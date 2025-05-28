@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WebXR Video Player - Herlev1</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #000;
+      overflow: hidden;
+      height: 100vh;
+      position: relative;
+    }
+    
+    #video-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    #main-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+    }
+    
+    #main-video.loaded {
+      opacity: 1;
+    }
+    
+    .video-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 1;
+      transition: opacity 0.5s ease;
+      pointer-events: none;
+    }
+    
+    .video-overlay.hidden {
+      opacity: 0;
+    }
+    
+    .play-button {
+      width: 80px;
+      height: 80px;
+      border: 3px solid rgba(255,255,255,0.9);
+      border-radius: 50%;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      pointer-events: auto;
+    }
+    
+    .play-button:hover {
+      transform: scale(1.1);
+      background: rgba(255,255,255,0.2);
+    }
+    
+    .play-button::after {
+      content: '';
+      width: 0;
+      height: 0;
+      border-left: 20px solid rgba(255,255,255,0.9);
+      border-top: 12px solid transparent;
+      border-bottom: 12px solid transparent;
+      margin-left: 4px;
+    }
+    
+    .exit-button {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      width: 44px;
+      height: 44px;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 12px;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      transition: all 0.3s ease;
+    }
+    
+    .exit-button:hover {
+      background: rgba(255,255,255,0.2);
+    }
+    
+    .immersive-mode .exit-button {
+      display: flex;
+    }
+    
+    /* Only hide video in AR mode, not fullscreen */
+    .ar-mode #main-video {
+      opacity: 0.01;
+      width: 1px;
+      height: 1px;
+      position: absolute;
+    }
+    
+    /* Fullscreen mode keeps video visible */
+    .fullscreen-mode #main-video {
+      opacity: 1;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    
+    .status {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 1001;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    
+    .status.visible {
+      opacity: 1;
+    }
+    
+    .loading-indicator {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 16px;
+      opacity: 1;
+      transition: opacity 0.5s ease;
+    }
+    
+    .loading-indicator.hidden {
+      opacity: 0;
+    }
+    
+    .device-info {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      color: white;
+      padding: 8px 12px;
+      font-size: 12px;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+    
+    .device-info.visible {
+      opacity: 1;
+    }
+    
+    @media (max-width: 768px) {
+      .play-button {
+        width: 70px;
+        height: 70px;
+      }
+      
+      .play-button::after {
+        border-left-width: 18px;
+        border-top-width: 10px;
+        border-bottom-width: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="video-container">
+    <video id="main-video" playsinline crossorigin="anonymous" preload="metadata">
+      <source src="Herlev1.mp4" type="video/mp4">
+    </video>
+    
+    <div class="loading-indicator" id="loading">Loading Herlev1.mp4...</div>
+    
+    <div class="video-overlay" id="video-overlay">
+      <div class="play-button" id="play-button"></div>
+    </div>
+  </div>
+  
+  <button class="exit-button" id="exit-button">×</button>
+  <div class="device-info" id="device-info"></div>
+  <div class="status" id="status"></div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
+
+    // Core variables
+    let camera, scene, renderer, videoMesh, controllers = [], xrSession = null;
+    let videoTexture, videoMaterial;
+    let isPlaying = false;
+    let arSupported = false;
+    let isInImmersiveMode = false;
+    let isInFullscreen = false;
+    let isInARMode = false;
+    
+    // Controller state with long press tracking
+    let controllerState = [
+      { isPressed: false, pressStartTime: 0, longPressTriggered: false },
+      { isPressed: false, pressStartTime: 0, longPressTriggered: false }
+    ];
+    
+    // Panel positioning
+    let targetPosition = new THREE.Vector3(0, 0, -1.2);
+    let targetRotation = new THREE.Quaternion();
+    
+    // DOM elements
+    const mainVideo = document.getElementById('main-video');
+    const playButton = document.getElementById('play-button');
+    const videoOverlay = document.getElementById('video-overlay');
+    const exitButton = document.getElementById('exit-button');
+    const statusEl = document.getElementById('status');
+    const loadingEl = document.getElementById('loading');
+    const deviceInfoEl = document.getElementById('device-info');
+    
+    function init() {
+      // Check WebXR support
+      checkARSupport();
+      
+      // Setup Three.js for AR mode
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+      
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.setClearColor(0x000000, 0);
+      renderer.domElement.style.position = 'absolute';
+      renderer.domElement.style.top = '0';
+      renderer.domElement.style.left = '0';
+      renderer.domElement.style.zIndex = '-1';
+      document.body.appendChild(renderer.domElement);
+      
+      // Setup video
+      setupVideo();
+      
+      // Load the Herlev1 video
+      mainVideo.load();
+      
+      // Event listeners
+      playButton.addEventListener('click', startPlayback);
+      exitButton.addEventListener('click', exitImmersiveMode);
+      
+      mainVideo.addEventListener('loadeddata', onVideoLoaded);
+      mainVideo.addEventListener('loadstart', onVideoLoadStart);
+      mainVideo.addEventListener('error', onVideoError);
+      mainVideo.addEventListener('ended', onVideoEnded);
+      
+      // Fullscreen change events
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+      document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+      
+      window.addEventListener('resize', onWindowResize);
+      
+      showStatus('Loading Herlev1.mp4...');
+    }
+    
+    async function checkARSupport() {
+      if (!navigator.xr) {
+        updateDeviceInfo('Standard Device');
+        return;
+      }
+      
+      try {
+        arSupported = await navigator.xr.isSessionSupported('immersive-ar');
+        if (arSupported) {
+          updateDeviceInfo('WebXR Ready');
+          showStatus('WebXR device detected - will auto-enter AR on play');
+        } else {
+          updateDeviceInfo('WebXR Not Available');
+        }
+      } catch (e) {
+        updateDeviceInfo('WebXR Check Failed');
+        console.log('AR check failed:', e);
+      }
+    }
+    
+    function updateDeviceInfo(text) {
+      deviceInfoEl.textContent = text;
+      deviceInfoEl.classList.add('visible');
+      
+      setTimeout(() => {
+        deviceInfoEl.classList.remove('visible');
+      }, 4000);
+    }
+    
+    function setupVideo() {
+      // Create video texture for AR mode
+      videoTexture = new THREE.VideoTexture(mainVideo);
+      videoTexture.minFilter = THREE.LinearFilter;
+      videoTexture.magFilter = THREE.LinearFilter;
+      videoTexture.format = THREE.RGBAFormat;
+      
+      // Create rounded rectangle material with shader
+      const vertexShader = `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `;
+      
+      const fragmentShader = `
+        uniform sampler2D map;
+        uniform float cornerRadius;
+        uniform vec2 resolution;
+        varying vec2 vUv;
+        
+        float roundedBoxSDF(vec2 centerPos, vec2 size, float radius) {
+          return length(max(abs(centerPos) - size + radius, 0.0)) - radius;
+        }
+        
+        void main() {
+          vec2 centerPos = (vUv - 0.5) * resolution;
+          float distance = roundedBoxSDF(centerPos, resolution * 0.5, cornerRadius);
+          float smoothedAlpha = 1.0 - smoothstep(0.0, 1.0, distance);
+          
+          vec4 texColor = texture2D(map, vUv);
+          gl_FragColor = vec4(texColor.rgb, texColor.a * smoothedAlpha);
+        }
+      `;
+      
+      videoMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          map: { value: videoTexture },
+          cornerRadius: { value: 15.0 },
+          resolution: { value: new THREE.Vector2(512, 288) }
+        },
+        vertexShader: vertexShader,
+        fragmentShader: fragmentShader,
+        transparent: true
+      });
+      
+      // Create panel geometry - 30% smaller (1.68 instead of 2.4)
+      const aspectRatio = 16 / 9; // Default, will update when video loads
+      const panelGeometry = new THREE.PlaneGeometry(1.68, 1.68 / aspectRatio);
+      
+      videoMesh = new THREE.Mesh(panelGeometry, videoMaterial);
+      videoMesh.position.copy(targetPosition);
+      scene.add(videoMesh);
+      
+      // Ambient light for visibility
+      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    }
+    
+    function onVideoLoadStart() {
+      loadingEl.classList.remove('hidden');
+      showStatus('Loading video...');
+    }
+    
+    function onVideoLoaded() {
+      mainVideo.classList.add('loaded');
+      loadingEl.classList.add('hidden');
+      
+      // Update panel geometry based on actual video dimensions
+      if (mainVideo.videoWidth && mainVideo.videoHeight) {
+        const aspectRatio = mainVideo.videoWidth / mainVideo.videoHeight;
+        const newGeometry = new THREE.PlaneGeometry(1.68, 1.68 / aspectRatio);
+        videoMesh.geometry.dispose();
+        videoMesh.geometry = newGeometry;
+        
+        // Update shader resolution
+        videoMaterial.uniforms.resolution.value.set(
+          mainVideo.videoWidth * 0.1, 
+          mainVideo.videoHeight * 0.1
+        );
+      }
+      
+      const modeText = arSupported ? 'Ready - will start in AR mode' : 'Ready - will start in fullscreen';
+      showStatus(`Herlev1.mp4 ${modeText}`);
+    }
+    
+    function onVideoError() {
+      loadingEl.classList.add('hidden');
+      showStatus('Error loading Herlev1.mp4 - check file exists');
+    }
+    
+    function onVideoEnded() {
+      isPlaying = false;
+      showStatus('Video ended - exiting immersive mode');
+      
+      // Auto-exit immersive mode when video ends
+      setTimeout(() => {
+        exitImmersiveMode();
+      }, 1000);
+    }
+    
+    async function startPlayback() {
+      if (mainVideo.readyState < 2) {
+        showStatus('Video not ready yet - please wait');
+        return;
+      }
+      
+      // Start video playback first
+      try {
+        mainVideo.muted = false;
+        await mainVideo.play();
+        isPlaying = true;
+        videoOverlay.classList.add('hidden');
+        
+        // Then automatically enter appropriate immersive mode
+        if (arSupported) {
+          showStatus('Starting AR mode...');
+          await enterAR();
+        } else {
+          showStatus('Entering fullscreen...');
+          await enterFullscreen();
+        }
+        
+      } catch (err) {
+        // Try with muted audio
+        try {
+          mainVideo.muted = true;
+          await mainVideo.play();
+          isPlaying = true;
+          videoOverlay.classList.add('hidden');
+          
+          if (arSupported) {
+            showStatus('Starting AR mode (muted)...');
+            await enterAR();
+          } else {
+            showStatus('Entering fullscreen (muted)...');
+            await enterFullscreen();
+          }
+          
+          // Try to unmute after starting
+          setTimeout(() => {
+            mainVideo.muted = false;
+            if (!mainVideo.muted) {
+              showStatus('Audio enabled');
+            }
+          }, 1000);
+          
+        } catch (err2) {
+          showStatus('Playback failed: ' + err2.message);
+        }
+      }
+    }
+    
+    async function enterAR() {
+      if (!arSupported) return;
+      
+      try {
+        const session = await navigator.xr.requestSession('immersive-ar', {
+          optionalFeatures: ['hand-tracking']
+        });
+        
+        await onSessionStarted(session);
+        
+      } catch (err) {
+        showStatus('AR failed, trying fullscreen: ' + err.message);
+        await enterFullscreen();
+      }
+    }
+    
+    async function enterFullscreen() {
+      try {
+        const elem = document.documentElement;
+        
+        if (elem.requestFullscreen) {
+          await elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+          await elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) {
+          await elem.msRequestFullscreen();
+        }
+        
+        isInFullscreen = true;
+        isInImmersiveMode = true;
+        isInARMode = false;
+        document.body.classList.add('immersive-mode', 'fullscreen-mode');
+        showStatus('Fullscreen mode active - tap × to exit');
+        
+      } catch (err) {
+        showStatus('Fullscreen failed: ' + err.message);
+      }
+    }
+    
+    async function onSessionStarted(session) {
+      xrSession = session;
+      isInImmersiveMode = true;
+      isInARMode = true;
+      
+      // Hide regular UI, show AR mode
+      document.body.classList.add('immersive-mode', 'ar-mode');
+      
+      // Setup XR
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(session);
+      
+      // Setup controllers
+      controllers = [0, 1].map(i => {
+        const controller = renderer.xr.getController(i);
+        controller.addEventListener('selectstart', () => handleControllerPress(i, true));
+        controller.addEventListener('selectend', () => handleControllerPress(i, false));
+        scene.add(controller);
+        return controller;
+      });
+      
+      // Start render loop
+      renderer.setAnimationLoop(render);
+      
+      // Session end handler
+      session.addEventListener('end', onSessionEnd);
+      
+      const audioStatus = mainVideo.muted ? ' (muted)' : ' with audio';
+      showStatus('AR mode active' + audioStatus + ' - tap to pause/play, hold 6s to exit');
+    }
+    
+    function handleControllerPress(controllerIndex, isPressed) {
+      const state = controllerState[controllerIndex];
+      
+      if (isPressed) {
+        state.isPressed = true;
+        state.pressStartTime = Date.now();
+        state.longPressTriggered = false;
+        
+        // Start checking for long press
+        setTimeout(() => {
+          if (state.isPressed && !state.longPressTriggered) {
+            const pressDuration = Date.now() - state.pressStartTime;
+            if (pressDuration >= 6000) { // 6 seconds
+              state.longPressTriggered = true;
+              showStatus('Exiting AR mode...');
+              exitImmersiveMode();
+            }
+          }
+        }, 6000);
+        
+      } else {
+        if (state.isPressed && !state.longPressTriggered) {
+          const pressDuration = Date.now() - state.pressStartTime;
+          
+          if (pressDuration < 500) { // Short press
+            togglePlayPause();
+          }
+        }
+        
+        state.isPressed = false;
+        state.pressStartTime = 0;
+        state.longPressTriggered = false;
+      }
+    }
+    
+    function togglePlayPause() {
+      if (isPlaying) {
+        mainVideo.pause();
+        isPlaying = false;
+        showStatus('Paused');
+      } else {
+        mainVideo.play().then(() => {
+          isPlaying = true;
+          showStatus('Playing');
+        }).catch(err => {
+          showStatus('Play failed: ' + err.message);
+        });
+      }
+    }
+    
+    function exitImmersiveMode() {
+      if (xrSession) {
+        xrSession.end();
+      } else if (isInFullscreen) {
+        exitFullscreen();
+      }
+    }
+    
+    function exitFullscreen() {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      } else if (document.msExitFullscreen) {
+        document.msExitFullscreen();
+      }
+    }
+    
+    function onFullscreenChange() {
+      const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+      
+      if (!isFullscreen && isInFullscreen) {
+        // Exited fullscreen
+        isInFullscreen = false;
+        isInImmersiveMode = false;
+        isInARMode = false;
+        document.body.classList.remove('immersive-mode', 'fullscreen-mode');
+        
+        // Pause video and show overlay
+        if (isPlaying) {
+          mainVideo.pause();
+          isPlaying = false;
+        }
+        videoOverlay.classList.remove('hidden');
+        showStatus('Exited fullscreen mode');
+      }
+    }
+    
+    function onSessionEnd() {
+      // Restore normal UI
+      isInImmersiveMode = false;
+      isInARMode = false;
+      document.body.classList.remove('immersive-mode', 'ar-mode');
+      
+      // Cleanup XR
+      renderer.setAnimationLoop(null);
+      xrSession = null;
+      
+      // Remove controllers
+      controllers.forEach(controller => scene.remove(controller));
+      controllers = [];
+      
+      // Reset controller states
+      controllerState.forEach(state => {
+        state.isPressed = false;
+        state.pressStartTime = 0;
+        state.longPressTriggered = false;
+      });
+      
+      // Pause video and show overlay
+      if (isPlaying) {
+        mainVideo.pause();
+        isPlaying = false;
+      }
+      videoOverlay.classList.remove('hidden');
+      
+      showStatus('Exited AR mode');
+    }
+    
+    function render(timestamp, frame) {
+      // Update video texture
+      if (videoTexture) {
+        videoTexture.needsUpdate = true;
+      }
+      
+      // Keep panel properly positioned in front of user in AR
+      if (videoMesh && xrSession) {
+        // Get camera matrix
+        const cameraMatrix = new THREE.Matrix4().copy(camera.matrixWorld);
+        
+        // Calculate position 1.2 units in front of camera
+        const forward = new THREE.Vector3(0, 0, -1.2);
+        forward.applyMatrix4(cameraMatrix);
+        targetPosition.copy(forward);
+        
+        // Calculate rotation to face camera
+        const lookDirection = new THREE.Vector3().subVectors(camera.position, targetPosition).normalize();
+        targetRotation.setFromUnitVectors(new THREE.Vector3(0, 0, 1), lookDirection);
+        
+        // Smooth interpolation
+        videoMesh.position.lerp(targetPosition, 0.1);
+        videoMesh.quaternion.slerp(targetRotation, 0.1);
+        
+        // Keep panel level (prevent tilting)
+        const euler = new THREE.Euler().setFromQuaternion(videoMesh.quaternion);
+        euler.x = Math.max(-0.3, Math.min(0.3, euler.x)); // Limit pitch
+        euler.z = 0; // Remove roll
+        videoMesh.quaternion.setFromEuler(euler);
+      }
+      
+      renderer.render(scene, camera);
+    }
+    
+    function showStatus(message) {
+      statusEl.textContent = message;
+      statusEl.classList.add('visible');
+      
+      clearTimeout(showStatus.timeout);
+      showStatus.timeout = setTimeout(() => {
+        statusEl.classList.remove('visible');
+      }, 3000);
+    }
+    
+    function onWindowResize() {
+      if (camera) {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+      }
+      if (renderer) {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+    }
+    
+    // Cleanup
+    window.addEventListener('beforeunload', () => {
+      if (xrSession) {
+        xrSession.end();
+      }
+    });
+    
+    // Initialize
+    init();
+  </script>
+</body>
+</html>
